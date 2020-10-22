@@ -1,6 +1,8 @@
 package cron
 
 import (
+	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -195,6 +197,58 @@ func TestNext(t *testing.T) {
 		expected := getTime(c.expected)
 		if !actual.Equal(expected) {
 			t.Errorf("%s, \"%s\": (expected) %v != %v (actual)", c.time, c.spec, expected, actual)
+		}
+	}
+}
+
+func TestNextWithJitter(t *testing.T) {
+	runs := []struct {
+		time     string
+		spec     string
+		jitter   UniformJitter
+		expected string
+	}{
+		// expect in 15 mins, 1m jitter
+		{"Mon Jul 9 14:45 2012", "0 0/15 * * * *", UniformJitter{time.Minute}, "Mon Jul 9 15:00 2012"},
+		// expect in 15 mins, 20m jitter
+		{"Mon Jul 9 14:45 2012", "0 0/15 * * * *", UniformJitter{20 * time.Minute}, "Mon Jul 9 15:00 2012"},
+		// expect in 35 mins, 5m jitter
+		{"Mon Jul 9 15:45 2012", "0 20-35/15 * * * *", UniformJitter{5 * time.Minute}, "Mon Jul 9 16:20 2012"},
+
+		// expect in 14 mins (next day), 5 min jitter
+		{"Mon Jul 9 23:46 2012", "0 */15 * * * *", UniformJitter{5 * time.Minute}, "Tue Jul 10 00:00 2012"},
+
+		// expect next month, 15 min jitter
+		{"Mon Jul 9 23:35 2012", "0 0 0 9 Apr-Oct ?", UniformJitter{15 * time.Minute}, "Thu Aug 9 00:00 2012"},
+
+		// expect during Daylight savings time 2am EST (-5) -> 3am EDT (-4); 30 min jitter
+		{"2012-03-11T00:00:00-0500", "TZ=America/New_York 0 30 2 11 Mar ?", UniformJitter{30 * time.Minute}, "2013-03-11T02:30:00-0400"},
+
+		// expect hourly, 10 min jitter
+		{"2012-03-11T00:00:00-0500", "TZ=America/New_York 0 0 * * * ?", UniformJitter{10 * time.Minute}, "2012-03-11T01:00:00-0500"},
+
+		// // 1am nightly job (runs twice)
+		{"2012-11-04T00:00:00-0400", "TZ=America/New_York 0 0 1 * * ?", UniformJitter{20 * time.Minute}, "2012-11-04T01:00:00-0400"},
+	}
+
+	for _, c := range runs {
+		spec := fmt.Sprintf("JITTER=%v %s", c.jitter.Deviation, c.spec)
+		sched, err := secondParser.Parse(spec)
+		if err != nil {
+			t.Error(err)
+			continue
+		}
+		tm := getTime(c.time)
+
+		for i := 0; i < 1000; i++ {
+			actual := sched.Next(tm)
+			expected := getTime(c.expected)
+			if actual.Before(tm) {
+				t.Errorf("%s should not be before %s", actual, tm)
+			}
+			if time.Duration(math.Abs(float64(expected.Sub(actual)))) >= c.jitter.Deviation {
+				t.Errorf("%s should be within %v of %s", actual, c.jitter.Deviation, expected)
+			}
 		}
 	}
 }

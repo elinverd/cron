@@ -90,8 +90,11 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 		return nil, fmt.Errorf("empty spec string")
 	}
 
-	// Extract timezone if present
 	var loc = time.Local
+	var jitter = UniformJitter{}
+
+WRAP:
+	// Extract timezone if present
 	if strings.HasPrefix(spec, "TZ=") || strings.HasPrefix(spec, "CRON_TZ=") {
 		var err error
 		i := strings.Index(spec, " ")
@@ -100,6 +103,23 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 			return nil, fmt.Errorf("provided bad location %s: %v", spec[eq+1:i], err)
 		}
 		spec = strings.TrimSpace(spec[i:])
+		goto WRAP
+	}
+
+	// Extract jitter if present
+	if strings.HasPrefix(spec, "JITTER=") {
+		var (
+			dur time.Duration
+			err error
+		)
+		i := strings.Index(spec, " ")
+		eq := strings.Index(spec, "=")
+		if dur, err = time.ParseDuration(spec[eq+1 : i]); err != nil {
+			return nil, fmt.Errorf("provided bad jitter %s: %v", spec[eq+1:i], err)
+		}
+		jitter.Deviation = dur
+		spec = strings.TrimSpace(spec[i:])
+		goto WRAP
 	}
 
 	// Handle named schedules (descriptors), if configured
@@ -107,7 +127,7 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 		if p.options&Descriptor == 0 {
 			return nil, fmt.Errorf("parser does not accept descriptors: %v", spec)
 		}
-		return parseDescriptor(spec, loc)
+		return parseDescriptor(spec, loc, jitter)
 	}
 
 	// Split on whitespace.
@@ -141,7 +161,7 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 		return nil, err
 	}
 
-	return &SpecSchedule{
+	return WrapWithJitter(&SpecSchedule{
 		Second:   second,
 		Minute:   minute,
 		Hour:     hour,
@@ -149,7 +169,7 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 		Month:    month,
 		Dow:      dayofweek,
 		Location: loc,
-	}, nil
+	}, jitter), nil
 }
 
 // normalizeFields takes a subset set of the time fields and returns the full set
@@ -362,10 +382,10 @@ func all(r bounds) uint64 {
 }
 
 // parseDescriptor returns a predefined schedule for the expression, or error if none matches.
-func parseDescriptor(descriptor string, loc *time.Location) (Schedule, error) {
+func parseDescriptor(descriptor string, loc *time.Location, jitter Jitter) (Schedule, error) {
 	switch descriptor {
 	case "@yearly", "@annually":
-		return &SpecSchedule{
+		return WrapWithJitter(&SpecSchedule{
 			Second:   1 << seconds.min,
 			Minute:   1 << minutes.min,
 			Hour:     1 << hours.min,
@@ -373,10 +393,10 @@ func parseDescriptor(descriptor string, loc *time.Location) (Schedule, error) {
 			Month:    1 << months.min,
 			Dow:      all(dow),
 			Location: loc,
-		}, nil
+		}, jitter), nil
 
 	case "@monthly":
-		return &SpecSchedule{
+		return WrapWithJitter(&SpecSchedule{
 			Second:   1 << seconds.min,
 			Minute:   1 << minutes.min,
 			Hour:     1 << hours.min,
@@ -384,10 +404,10 @@ func parseDescriptor(descriptor string, loc *time.Location) (Schedule, error) {
 			Month:    all(months),
 			Dow:      all(dow),
 			Location: loc,
-		}, nil
+		}, jitter), nil
 
 	case "@weekly":
-		return &SpecSchedule{
+		return WrapWithJitter(&SpecSchedule{
 			Second:   1 << seconds.min,
 			Minute:   1 << minutes.min,
 			Hour:     1 << hours.min,
@@ -395,10 +415,11 @@ func parseDescriptor(descriptor string, loc *time.Location) (Schedule, error) {
 			Month:    all(months),
 			Dow:      1 << dow.min,
 			Location: loc,
-		}, nil
+			//Jitter:   jitter,
+		}, jitter), nil
 
 	case "@daily", "@midnight":
-		return &SpecSchedule{
+		return WrapWithJitter(&SpecSchedule{
 			Second:   1 << seconds.min,
 			Minute:   1 << minutes.min,
 			Hour:     1 << hours.min,
@@ -406,10 +427,11 @@ func parseDescriptor(descriptor string, loc *time.Location) (Schedule, error) {
 			Month:    all(months),
 			Dow:      all(dow),
 			Location: loc,
-		}, nil
+			//Jitter:   jitter,
+		}, jitter), nil
 
 	case "@hourly":
-		return &SpecSchedule{
+		return WrapWithJitter(&SpecSchedule{
 			Second:   1 << seconds.min,
 			Minute:   1 << minutes.min,
 			Hour:     all(hours),
@@ -417,7 +439,8 @@ func parseDescriptor(descriptor string, loc *time.Location) (Schedule, error) {
 			Month:    all(months),
 			Dow:      all(dow),
 			Location: loc,
-		}, nil
+			//Jitter:   jitter,
+		}, jitter), nil
 
 	}
 
@@ -427,7 +450,7 @@ func parseDescriptor(descriptor string, loc *time.Location) (Schedule, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse duration %s: %s", descriptor, err)
 		}
-		return Every(duration), nil
+		return WrapWithJitter(Every(duration), jitter), nil
 	}
 
 	return nil, fmt.Errorf("unrecognized descriptor: %s", descriptor)

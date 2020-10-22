@@ -144,12 +144,19 @@ func TestParseSchedule(t *testing.T) {
 		expr     string
 		expected Schedule
 	}{
-		{secondParser, "0 5 * * * *", every5min(time.Local)},
-		{standardParser, "5 * * * *", every5min(time.Local)},
-		{secondParser, "CRON_TZ=UTC  0 5 * * * *", every5min(time.UTC)},
-		{standardParser, "CRON_TZ=UTC  5 * * * *", every5min(time.UTC)},
-		{secondParser, "CRON_TZ=Asia/Tokyo 0 5 * * * *", every5min(tokyo)},
-		{secondParser, "@every 5m", ConstantDelaySchedule{5 * time.Minute}},
+		{secondParser, "0 5 * * * *", every5min(time.Local, UniformJitter{})},
+		{standardParser, "5 * * * *", every5min(time.Local, UniformJitter{})},
+		{secondParser, "CRON_TZ=UTC  0 5 * * * *", every5min(time.UTC, UniformJitter{})},
+		{secondParser, "JITTER=1m30s 0 5 * * * *", every5min(time.Local, UniformJitter{90 * time.Second})},
+		{secondParser, "CRON_TZ=UTC JITTER=1m30s 0 5 * * * *", every5min(time.UTC, UniformJitter{90 * time.Second})},
+		{secondParser, "JITTER=1m30s CRON_TZ=UTC 0 5 * * * *", every5min(time.UTC, UniformJitter{90 * time.Second})},
+		{standardParser, "CRON_TZ=UTC  5 * * * *", every5min(time.UTC, UniformJitter{})},
+
+		{secondParser, "CRON_TZ=Asia/Tokyo 0 5 * * * *", every5min(tokyo, UniformJitter{})},
+		{secondParser, "@every 5m", WrapWithJitter(ConstantDelaySchedule{5 * time.Minute}, UniformJitter{})},
+		{secondParser, "JITTER=2m @every 5m", WrapWithJitter(ConstantDelaySchedule{5 * time.Minute}, UniformJitter{2 * time.Minute})},
+		// what happens if we specify a jitter that is larger than the delay? it will be accepted; consumer wins...
+		{secondParser, "JITTER=1h30m @every 5m", WrapWithJitter(ConstantDelaySchedule{5 * time.Minute}, UniformJitter{90 * time.Minute})},
 		{secondParser, "@midnight", midnight(time.Local)},
 		{secondParser, "TZ=UTC  @midnight", midnight(time.UTC)},
 		{secondParser, "TZ=Asia/Tokyo @midnight", midnight(tokyo)},
@@ -158,7 +165,7 @@ func TestParseSchedule(t *testing.T) {
 		{
 			parser: secondParser,
 			expr:   "* 5 * * * *",
-			expected: &SpecSchedule{
+			expected: WrapWithJitter(&SpecSchedule{
 				Second:   all(seconds),
 				Minute:   1 << 5,
 				Hour:     all(hours),
@@ -166,7 +173,7 @@ func TestParseSchedule(t *testing.T) {
 				Month:    all(months),
 				Dow:      all(dow),
 				Location: time.Local,
-			},
+			}, nil),
 		},
 	}
 
@@ -187,9 +194,9 @@ func TestOptionalSecondSchedule(t *testing.T) {
 		expr     string
 		expected Schedule
 	}{
-		{"0 5 * * * *", every5min(time.Local)},
+		{"0 5 * * * *", every5min(time.Local, UniformJitter{})},
 		{"5 5 * * * *", every5min5s(time.Local)},
-		{"5 * * * *", every5min(time.Local)},
+		{"5 * * * *", every5min(time.Local, UniformJitter{})},
 	}
 
 	for _, c := range entries {
@@ -320,11 +327,11 @@ func TestStandardSpecSchedule(t *testing.T) {
 	}{
 		{
 			expr:     "5 * * * *",
-			expected: &SpecSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), all(dow), time.Local},
+			expected: WrapWithJitter(&SpecSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), all(dow), time.Local}, nil),
 		},
 		{
 			expr:     "@every 5m",
-			expected: ConstantDelaySchedule{time.Duration(5) * time.Minute},
+			expected: WrapWithJitter(ConstantDelaySchedule{time.Duration(5) * time.Minute}, nil),
 		},
 		{
 			expr: "5 j * * *",
@@ -358,20 +365,20 @@ func TestNoDescriptorParser(t *testing.T) {
 	}
 }
 
-func every5min(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), all(dow), loc}
+func every5min(loc *time.Location, jitter Jitter) Schedule {
+	return WrapWithJitter(&SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), all(dow), loc}, jitter)
 }
 
-func every5min5s(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), all(dow), loc}
+func every5min5s(loc *time.Location) Schedule {
+	return WrapWithJitter(&SpecSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), all(dow), loc}, nil)
 }
 
-func midnight(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1, 1, 1, all(dom), all(months), all(dow), loc}
+func midnight(loc *time.Location) Schedule {
+	return WrapWithJitter(&SpecSchedule{1, 1, 1, all(dom), all(months), all(dow), loc}, nil)
 }
 
-func annual(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{
+func annual(loc *time.Location) Schedule {
+	return WrapWithJitter(&SpecSchedule{
 		Second:   1 << seconds.min,
 		Minute:   1 << minutes.min,
 		Hour:     1 << hours.min,
@@ -379,5 +386,5 @@ func annual(loc *time.Location) *SpecSchedule {
 		Month:    1 << months.min,
 		Dow:      all(dow),
 		Location: loc,
-	}
+	}, nil)
 }
