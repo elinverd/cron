@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"math/rand"
 	"time"
 )
 
@@ -41,5 +42,13 @@ func WithChain(wrappers ...JobWrapper) Option {
 func WithLogger(logger Logger) Option {
 	return func(c *Cron) {
 		c.logger = logger
+	}
+}
+
+// WithSeed seeds the random number generator with the supplied number
+// for use with jitter functionality
+func WithSeed(seed int64) Option {
+	return func(_ *Cron) {
+		rand.Seed(seed)
 	}
 }

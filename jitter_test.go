@@ -45,23 +45,37 @@ func TestJitterGenerate(t *testing.T) {
 }
 
 func TestScheduleWithJitterNext(t *testing.T) {
+	sched, err := ParseStandard("JITTER=10m 30 7 * * *")
+	if err != nil {
+		t.Error(err)
+	}
+	// inject a mock rand source into the scheduler
 	src := &mockRandSource{seq: []int64{
-		int64(17 * time.Minute),
-		int64(-2 * time.Minute),
-		int64(11 * time.Minute),
+		int64(17 * time.Minute), // + 7m
+		int64(3 * time.Minute),  // - 7m
+		int64(11 * time.Minute), // + 1m
 	}}
-
-	sched := WrapWithJitter(Every(5*time.Minute), UniformJitter{5 * time.Minute}.WithSource(src))
-	var t1, t2, t3 time.Time
-	t1, _ = time.Parse(time.RFC3339, "2020-10-08T10:00:00Z")
-
-	expected2, _ := time.Parse(time.RFC3339, "2020-10-08T10:07:00Z")
-	if t2 = sched.Next(t1); t2 != expected2 {
-		t.Errorf("expected %s, got %s", expected2, t2)
+	s, ok := sched.(*ScheduleWithJitter)
+	if !ok {
+		t.Error("Failed to convert type")
 	}
-	expected3, _ := time.Parse(time.RFC3339, "2020-10-08T10:12:00Z")
-	if t3 = sched.Next(t2); t3 != expected3 {
-		t.Errorf("expected %s, got %s", expected3, t3)
+	s.jitter = s.jitter.WithSource(src)
+
+	var now, expected, t1, t2, t3 time.Time
+	now, _ = time.Parse(time.RFC3339, "2020-12-07T07:31:00Z")
+
+	expected, _ = time.Parse(time.RFC3339, "2020-12-08T07:37:00Z")
+	if t1 = sched.Next(now); t1 != expected {
+		t.Errorf("expected %s, got %s", expected, t1)
 	}
 
+	expected, _ = time.Parse(time.RFC3339, "2020-12-09T07:23:00Z")
+	if t2 = sched.Next(t1); t2 != expected {
+		t.Errorf("expected %s, got %s", expected, t2)
+	}
+
+	expected, _ = time.Parse(time.RFC3339, "2020-12-10T07:31:00Z")
+	if t3 = sched.Next(t2); t3 != expected {
+		t.Errorf("expected %s, got %s", expected, t3)
+	}
 }

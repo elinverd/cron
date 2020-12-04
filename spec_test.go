@@ -211,7 +211,9 @@ func TestNextWithJitter(t *testing.T) {
 		// expect in 15 mins, 1m jitter
 		{"Mon Jul 9 14:45 2012", "0 0/15 * * * *", UniformJitter{time.Minute}, "Mon Jul 9 15:00 2012"},
 		// expect in 15 mins, 20m jitter
-		{"Mon Jul 9 14:45 2012", "0 0/15 * * * *", UniformJitter{20 * time.Minute}, "Mon Jul 9 15:00 2012"},
+		{"Mon Jul 9 14:45 2012", "0 0/15 * * * *", UniformJitter{20 * time.Minute}, "Mon Jul 9 15:15 2012"},
+		// expect in 5 mins, 15m jitter
+		{"Mon Jul 9 14:55 2012", "0 0/5 * * * *", UniformJitter{15 * time.Minute}, "Mon Jul 9 15:15 2012"},
 		// expect in 35 mins, 5m jitter
 		{"Mon Jul 9 15:45 2012", "0 20-35/15 * * * *", UniformJitter{5 * time.Minute}, "Mon Jul 9 16:20 2012"},
 
